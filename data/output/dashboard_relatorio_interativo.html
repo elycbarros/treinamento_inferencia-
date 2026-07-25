@@ -1,0 +1,386 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Dashboard Interativo - Relatório Inferencial</title>
+  <style>
+    :root {
+      --bg: #f7f6f2;
+      --surface: #ffffff;
+      --surface-2: #f3f4f6;
+      --text: #1f2937;
+      --muted: #6b7280;
+      --border: #d1d5db;
+      --primary: #0f766e;
+      --primary-2: #134e4a;
+      --success: #166534;
+      --danger: #991b1b;
+      --warning: #92400e;
+      --shadow: 0 8px 24px rgba(0,0,0,.08);
+      --radius: 16px;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      font-family: Arial, sans-serif;
+      background: var(--bg);
+      color: var(--text);
+    }
+    .wrap {
+      max-width: 1400px;
+      margin: 0 auto;
+      padding: 24px;
+    }
+    .hero {
+      background: linear-gradient(135deg, var(--primary), var(--primary-2));
+      color: white;
+      padding: 28px;
+      border-radius: var(--radius);
+      box-shadow: var(--shadow);
+      margin-bottom: 24px;
+    }
+    .hero h1 {
+      margin: 0 0 8px 0;
+      font-size: 32px;
+    }
+    .hero p {
+      margin: 0;
+      opacity: .92;
+      max-width: 80ch;
+      line-height: 1.5;
+    }
+    .grid-kpis {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+      gap: 16px;
+      margin: 24px 0;
+    }
+    .kpi {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      padding: 20px;
+      box-shadow: var(--shadow);
+    }
+    .kpi .label {
+      font-size: 13px;
+      color: var(--muted);
+      margin-bottom: 8px;
+      text-transform: uppercase;
+      letter-spacing: .04em;
+    }
+    .kpi .value {
+      font-size: 28px;
+      font-weight: 700;
+    }
+    .controls {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 12px;
+      align-items: center;
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      padding: 16px;
+      box-shadow: var(--shadow);
+      margin-bottom: 24px;
+    }
+    .controls input, .controls select, .controls button {
+      font: inherit;
+      padding: 10px 12px;
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      background: white;
+    }
+    .controls button {
+      background: var(--primary);
+      color: white;
+      cursor: pointer;
+      border: none;
+    }
+    .tabs {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 10px;
+      margin-bottom: 16px;
+    }
+    .tab-button {
+      border: none;
+      background: #dfe7e7;
+      color: #18302f;
+      padding: 10px 14px;
+      border-radius: 999px;
+      cursor: pointer;
+      font-weight: 600;
+    }
+    .tab-button.active {
+      background: var(--primary);
+      color: white;
+    }
+    .panel {
+      display: none;
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      padding: 20px;
+      box-shadow: var(--shadow);
+      margin-bottom: 24px;
+      overflow: auto;
+    }
+    .panel.active {
+      display: block;
+    }
+    .panel h2 {
+      margin-top: 0;
+    }
+    .chart-box {
+      background: var(--surface-2);
+      border: 1px solid var(--border);
+      border-radius: 14px;
+      padding: 16px;
+      overflow-x: auto;
+    }
+    .chart-svg {
+      width: 100%;
+      min-height: 360px;
+      display: block;
+      background: white;
+      border-radius: 12px;
+    }
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      font-size: 14px;
+      background: white;
+    }
+    th, td {
+      border: 1px solid var(--border);
+      padding: 10px 12px;
+      text-align: left;
+      vertical-align: top;
+    }
+    th {
+      background: #ecf0f1;
+      position: sticky;
+      top: 0;
+    }
+    .empty-state {
+      color: var(--muted);
+      background: #fafafa;
+      border: 1px dashed var(--border);
+      padding: 16px;
+      border-radius: 12px;
+    }
+    .legend {
+      display: flex;
+      gap: 16px;
+      flex-wrap: wrap;
+      font-size: 13px;
+      color: var(--muted);
+      margin-top: 10px;
+    }
+    .legend span::before {
+      content: "";
+      display: inline-block;
+      width: 12px;
+      height: 12px;
+      margin-right: 6px;
+      border-radius: 999px;
+      vertical-align: -1px;
+    }
+    .legend .resid::before { background: #0f766e; }
+    .legend .zero::before { background: #991b1b; }
+    code {
+      background: #f3f4f6;
+      padding: 2px 6px;
+      border-radius: 6px;
+    }
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <section class="hero">
+      <h1>Dashboard Interativo do Relatório</h1>
+      <p>Leitura executiva dos resultados de inferência estatística aplicada à avaliação imobiliária, com foco em coeficientes, resíduos e diagnósticos normativos da trilha OLS/NBR 14653.</p>
+    </section>
+
+    <section class="grid-kpis">
+      <article class="kpi"><div class="label">R² ajustado</div><div class="value">-</div></article>
+      <article class="kpi"><div class="label">p-valor Teste F</div><div class="value">-</div></article>
+      <article class="kpi"><div class="label">Shapiro-Wilk</div><div class="value">-</div></article>
+      <article class="kpi"><div class="label">Durbin-Watson</div><div class="value">-</div></article>
+    </section>
+
+    <section class="controls">
+      <input id="tableSearch" type="text" placeholder="Filtrar tabelas por texto...">
+      <select id="statusFilter">
+        <option value="">Todos os status</option>
+        <option value="APROVADO">APROVADO</option>
+        <option value="REPROVADO">REPROVADO</option>
+        <option value="NORMAL">NORMAL</option>
+        <option value="NAO_NORMAL">NAO_NORMAL</option>
+        <option value="SIM">SIM</option>
+        <option value="NAO">NAO</option>
+      </select>
+      <button type="button" onclick="resetFilters()">Limpar filtros</button>
+    </section>
+
+    <nav class="tabs">
+      <button class="tab-button active" data-tab="diagnosticos">Diagnósticos</button>
+      <button class="tab-button" data-tab="coeficientes">Coeficientes</button>
+      <button class="tab-button" data-tab="residuos">Resíduos</button>
+      <button class="tab-button" data-tab="normalidade">Normalidade</button>
+      <button class="tab-button" data-tab="durbin">Durbin-Watson</button>
+    </nav>
+
+    <section id="diagnosticos" class="panel active">
+      <h2>Diagnósticos normativos</h2>
+      <p class="empty-state">Arquivo não encontrado ou sem dados: <code>diagnosticos_normativos</code>.</p>
+    </section>
+
+    <section id="coeficientes" class="panel">
+      <h2>Coeficientes e significância individual</h2>
+      <p class="empty-state">Arquivo não encontrado ou sem dados: <code>coeficientes</code>.</p>
+    </section>
+
+    <section id="residuos" class="panel">
+      <h2>Predições e resíduos</h2>
+      <div class="chart-box">
+        <svg id="residuosChart" class="chart-svg" viewBox="0 0 1000 420" preserveAspectRatio="none"></svg>
+        <div class="legend">
+          <span class="resid">Resíduos por observação</span>
+          <span class="zero">Linha zero</span>
+        </div>
+      </div>
+      <div style="margin-top:16px">
+        <p class="empty-state">Arquivo não encontrado ou sem dados: <code>predicoes_residuos</code>.</p>
+      </div>
+    </section>
+
+    <section id="normalidade" class="panel">
+      <h2>Resumo dos resíduos e normalidade</h2>
+      <h3>Resumo dos resíduos</h3>
+      <p class="empty-state">Arquivo não encontrado ou sem dados: <code>resumo_residuos</code>.</p>
+      <h3 style="margin-top:20px">Shapiro-Wilk</h3>
+      <p class="empty-state">Arquivo não encontrado ou sem dados: <code>normalidade</code>.</p>
+    </section>
+
+    <section id="durbin" class="panel">
+      <h2>Independência serial</h2>
+      <p class="empty-state">Arquivo não encontrado ou sem dados: <code>durbin_watson</code>.</p>
+    </section>
+  </div>
+
+  <script>
+    const residuosData = [];
+
+    document.querySelectorAll('.tab-button').forEach(btn => {
+      btn.addEventListener('click', () => {
+        document.querySelectorAll('.tab-button').forEach(b => b.classList.remove('active'));
+        document.querySelectorAll('.panel').forEach(p => p.classList.remove('active'));
+        btn.classList.add('active');
+        document.getElementById(btn.dataset.tab).classList.add('active');
+      });
+    });
+
+    function normalize(text) {
+      return String(text || '').toUpperCase();
+    }
+
+    function applyFilters() {
+      const text = normalize(document.getElementById('tableSearch').value);
+      const status = normalize(document.getElementById('statusFilter').value);
+
+      document.querySelectorAll('table tbody tr').forEach(row => {
+        const rowText = normalize(row.innerText);
+        const textOk = !text || rowText.includes(text);
+        const statusOk = !status || rowText.includes(status);
+        row.style.display = (textOk && statusOk) ? '' : 'none';
+      });
+    }
+
+    function resetFilters() {
+      document.getElementById('tableSearch').value = '';
+      document.getElementById('statusFilter').value = '';
+      applyFilters();
+    }
+
+    document.getElementById('tableSearch').addEventListener('input', applyFilters);
+    document.getElementById('statusFilter').addEventListener('change', applyFilters);
+
+    function renderResiduosChart() {
+      const svg = document.getElementById('residuosChart');
+      if (!svg || !residuosData.length) {
+        svg.innerHTML = '<text x="40" y="60" font-size="18" fill="#6b7280">Sem dados de resíduos para plotagem.</text>';
+        return;
+      }
+
+      const width = 1000;
+      const height = 420;
+      const margin = { top: 30, right: 30, bottom: 55, left: 70 };
+      const innerW = width - margin.left - margin.right;
+      const innerH = height - margin.top - margin.bottom;
+
+      const values = residuosData
+        .map(d => Number(d.residuo))
+        .filter(v => !Number.isNaN(v));
+
+      if (!values.length) {
+        svg.innerHTML = '<text x="40" y="60" font-size="18" fill="#6b7280">Sem valores numéricos de resíduos.</text>';
+        return;
+      }
+
+      const minY = Math.min(...values, 0);
+      const maxY = Math.max(...values, 0);
+      const spanY = (maxY - minY) || 1;
+
+      const xPos = i => margin.left + (i * innerW / Math.max(residuosData.length - 1, 1));
+      const yPos = v => margin.top + innerH - ((v - minY) / spanY) * innerH;
+      const zeroY = yPos(0);
+
+      let parts = [];
+      parts.push(`<rect x="0" y="0" width="${width}" height="${height}" fill="white" rx="12"></rect>`);
+      parts.push(`<line x1="${margin.left}" y1="${zeroY}" x2="${width - margin.right}" y2="${zeroY}" stroke="#991b1b" stroke-width="1.5" stroke-dasharray="6 6"></line>`);
+      parts.push(`<line x1="${margin.left}" y1="${margin.top}" x2="${margin.left}" y2="${height - margin.bottom}" stroke="#9ca3af"></line>`);
+      parts.push(`<line x1="${margin.left}" y1="${height - margin.bottom}" x2="${width - margin.right}" y2="${height - margin.bottom}" stroke="#9ca3af"></line>`);
+
+      const path = residuosData
+        .map((d, i) => `${i === 0 ? 'M' : 'L'} ${xPos(i).toFixed(2)} ${yPos(Number(d.residuo)).toFixed(2)}`)
+        .join(' ');
+      parts.push(`<path d="${path}" fill="none" stroke="#0f766e" stroke-width="2.5"></path>`);
+
+      residuosData.forEach((d, i) => {
+        const cx = xPos(i);
+        const cy = yPos(Number(d.residuo));
+        const label = String(d.x);
+        parts.push(`<circle cx="${cx}" cy="${cy}" r="4" fill="#0f766e"><title>${label} | resíduo: ${Number(d.residuo).toFixed(4)}</title></circle>`);
+      });
+
+      const ticks = 5;
+      for (let i = 0; i <= ticks; i++) {
+        const value = minY + (spanY * i / ticks);
+        const y = yPos(value);
+        parts.push(`<line x1="${margin.left}" y1="${y}" x2="${width - margin.right}" y2="${y}" stroke="#eef2f7"></line>`);
+        parts.push(`<text x="${margin.left - 10}" y="${y + 4}" text-anchor="end" font-size="12" fill="#6b7280">${value.toFixed(2)}</text>`);
+      }
+
+      const sampleStep = Math.max(1, Math.ceil(residuosData.length / 10));
+      residuosData.forEach((d, i) => {
+        if (i % sampleStep === 0 || i === residuosData.length - 1) {
+          const x = xPos(i);
+          parts.push(`<text x="${x}" y="${height - margin.bottom + 18}" text-anchor="middle" font-size="11" fill="#6b7280">${String(d.x)}</text>`);
+        }
+      });
+
+      parts.push(`<text x="${width / 2}" y="${height - 12}" text-anchor="middle" font-size="13" fill="#374151">Observações</text>`);
+      parts.push(`<text x="18" y="${height / 2}" transform="rotate(-90 18,${height / 2})" text-anchor="middle" font-size="13" fill="#374151">Resíduo</text>`);
+
+      svg.innerHTML = parts.join('');
+    }
+
+    renderResiduosChart();
+    applyFilters();
+  </script>
+</body>
+</html>
