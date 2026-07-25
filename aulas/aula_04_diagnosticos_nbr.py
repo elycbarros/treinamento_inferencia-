@@ -107,6 +107,8 @@ def export_outputs(
     summary: dict[str, object],
 ) -> None:
     """Exporta os artefatos da Aula 4 para a pasta data/output."""
+    # Esta exportação fecha o ciclo do treinamento,
+    # preservando o laudo objetivo dos diagnósticos do modelo.
     output_dir = project_root / "data" / "output"
     output_dir.mkdir(parents=True, exist_ok=True)
 
@@ -133,24 +135,19 @@ def main(csv_path: Path | None = None) -> None:
     print(f"Raiz do projeto: {project_root}")
     print(f"Arquivo utilizado: {dataset_path}")
 
+    # A Aula 4 recebe a base bruta, prepara as variáveis unitárias
+    # e então ajusta o modelo para validar seus pressupostos.
     df_raw = load_raw_dataset(dataset_path)
     df_prepared = add_unit_price_column(df_raw)
 
     artifacts = fit_ols_regression(
-        df=df_prepared,
+        df_prepared,
         target_col=TARGET_COLUMN,
-        feature_columns=list(PREFERRED_FEATURES),
-        add_intercept=True,
+        feature_columns=[col for col in PREFERRED_FEATURES if col in df_prepared.columns],
     )
 
     diagnostics_report, coefficients_report, summary = build_nbr_diagnostics_report(
-        artifacts,
-        minimum_adjusted_r_squared=0.70,
-        alpha_f=0.05,
-        alpha_t=0.10,
-        alpha_shapiro=0.05,
-        dw_lower_bound=1.5,
-        dw_upper_bound=2.5,
+        artifacts
     )
 
     print_diagnostics_report(diagnostics_report)

@@ -52,6 +52,8 @@ def compute_durbin_watson(residuals: pd.Series) -> float:
     if len(residual_values) < 2:
         return float("nan")
 
+    # O teste compara a variação entre resíduos consecutivos
+    # com a energia total dos próprios resíduos.
     diff = np.diff(residual_values)
     numerator = float(np.sum(diff**2))
     denominator = float(np.sum(residual_values**2))
@@ -70,6 +72,7 @@ def run_shapiro_wilk_test(
     """Executa Shapiro-Wilk, com fallback simples se SciPy não existir."""
     values = residuals.astype(float).to_numpy()
 
+    # O teste de normalidade requer tamanho mínimo de amostra.
     if len(values) < 3:
         return NormalityTestResult(
             test_name="Shapiro-Wilk",
@@ -111,6 +114,8 @@ def evaluate_explanatory_power(
     obtained_value = float(artifacts.adjusted_r_squared)
     approved = obtained_value >= minimum_adjusted_r_squared
 
+    # O R² ajustado é usado aqui porque penaliza excesso de variáveis
+    # e oferece leitura mais prudente do poder explicativo.
     return {
         "pressuposto": "Poder Explicativo",
         "metrica_teste": "R2 Ajustado",
@@ -129,6 +134,8 @@ def evaluate_global_significance(
     p_value = float(artifacts.f_p_value)
     approved = p_value < alpha
 
+    # O teste F verifica se o conjunto das explicativas,
+    # tomado em bloco, contribui para explicar a variável dependente.
     return {
         "pressuposto": "Significancia Global",
         "metrica_teste": "Teste F p-valor",
@@ -154,6 +161,9 @@ def evaluate_individual_significance(
         }
     )
 
+    # Aqui avaliamos variável por variável.
+    # Em contexto didático, isso ajuda a distinguir relevância global do modelo
+    # e relevância individual de cada coeficiente.
     table["significativo_10pct"] = np.where(table["p_valor_t"] <= alpha, "SIM", "NAO")
     return table
 
@@ -175,23 +185,24 @@ def evaluate_residual_normality(
         value = float(result.p_value)
         criterion = f"p-valor W > {alpha:.2f}"
 
-    row = {
+    summary = {
         "pressuposto": "Normalidade dos Residuos",
         "metrica_teste": "Shapiro-Wilk p-valor",
         "valor_obtido": value,
         "criterio_aceitacao": criterion,
         "status": status,
     }
-    return row, result
+
+    return summary, result
 
 
 def evaluate_residual_independence(
     artifacts: OLSRegressionArtifacts,
     *,
-    lower_bound: float = 1.5,
-    upper_bound: float = 2.5,
+    lower_bound: float = 1.50,
+    upper_bound: float = 2.50,
 ) -> tuple[dict[str, Any], DurbinWatsonResult]:
-    """Avalia a independência dos resíduos via Durbin-Watson."""
+    """Avalia independência dos resíduos pela estatística de Durbin-Watson."""
     statistic = compute_durbin_watson(artifacts.residuals)
 
     if np.isnan(statistic):
@@ -199,110 +210,99 @@ def evaluate_residual_independence(
     elif lower_bound <= statistic <= upper_bound:
         status = "APROVADO"
     else:
-        status = "ALERTA"
+        status = "REPROVADO"
 
+    # A leitura prática adotada nesta aula é por faixa:
+    # valores próximos de 2 sugerem independência residual.
     result = DurbinWatsonResult(
         statistic=float(statistic),
         status=status,
-        lower_bound=lower_bound,
-        upper_bound=upper_bound,
+        lower_bound=float(lower_bound),
+        upper_bound=float(upper_bound),
     )
 
-    row = {
-        "pressuposto": "Independencia de Residuos",
+    summary = {
+        "pressuposto": "Independencia dos Residuos",
         "metrica_teste": "Durbin-Watson",
         "valor_obtido": float(statistic),
-        "criterio_aceitacao": f"Entre {lower_bound:.1f} e {upper_bound:.1f}",
+        "criterio_aceitacao": f"{lower_bound:.2f} <= DW <= {upper_bound:.2f}",
         "status": status,
     }
-    return row, result
+
+    return summary, result
 
 
 def build_nbr_diagnostics_report(
     artifacts: OLSRegressionArtifacts,
-    *,
-    minimum_adjusted_r_squared: float = 0.70,
-    alpha_f: float = 0.05,
-    alpha_t: float = 0.10,
-    alpha_shapiro: float = 0.05,
-    dw_lower_bound: float = 1.5,
-    dw_upper_bound: float = 2.5,
 ) -> tuple[pd.DataFrame, pd.DataFrame, dict[str, Any]]:
-    """Monta o relatório consolidado de diagnóstico do modelo."""
-    explanatory_power_row = evaluate_explanatory_power(
-        artifacts,
-        minimum_adjusted_r_squared=minimum_adjusted_r_squared,
-    )
+    """Consolida os diagnósticos centrais do modelo em formato tabular."""
+    explanatory_power = evaluate_explanatory_power(artifacts)
+    global_significance = evaluate_global_significance(artifacts)
+    individual_significance = evaluate_individual_significance(artifacts)
+    residual_normality, normality_result = evaluate_residual_normality(artifacts)
+    residual_independence, dw_result = evaluate_residual_independence(artifacts)
 
-    global_significance_row = evaluate_global_significance(
-        artifacts,
-        alpha=alpha_f,
-    )
-
-    individual_significance_table = evaluate_individual_significance(
-        artifacts,
-        alpha=alpha_t,
-    )
-
-    normality_row, normality_result = evaluate_residual_normality(
-        artifacts,
-        alpha=alpha_shapiro,
-    )
-
-    independence_row, dw_result = evaluate_residual_independence(
-        artifacts,
-        lower_bound=dw_lower_bound,
-        upper_bound=dw_upper_bound,
-    )
-
-    diagnostics_report = pd.DataFrame(
+    diagnostics_df = pd.DataFrame(
         [
-            explanatory_power_row,
-            global_significance_row,
-            normality_row,
-            independence_row,
+            explanatory_power,
+            global_significance,
+            residual_normality,
+            residual_independence,
         ]
     )
 
-    approved_count = int(
-        diagnostics_report["status"].isin(["APROVADO", "NORMAL"]).sum()
+    approved_or_normal = diagnostics_df["status"].isin(["APROVADO", "NORMAL"]).sum()
+    total_items = int(len(diagnostics_df))
+    significant_10pct = int(
+        (individual_significance["significativo_10pct"] == "SIM").sum()
     )
-    total_count = int(len(diagnostics_report))
-    overall_status = (
-        "APROVADO"
-        if diagnostics_report["status"].isin(["REPROVADO"]).sum() == 0
-        else "REPROVADO"
-    )
+    total_coefficients = int(len(individual_significance))
 
+    # O resumo executivo transforma vários testes em uma visão consolidada,
+    # útil para aula, laudo e leitura rápida do status do modelo.
     summary = {
-        "status_geral_modelo": overall_status,
-        "itens_aprovados_ou_normais": approved_count,
-        "itens_avaliados": total_count,
-        "proporcao_aprovacao": approved_count / total_count if total_count else np.nan,
+        "status_geral_modelo": (
+            "APROVADO"
+            if approved_or_normal == total_items
+            else "APROVADO_COM_RESTRICOES"
+            if approved_or_normal >= max(1, total_items - 1)
+            else "REPROVADO"
+        ),
+        "itens_aprovados_ou_normais": int(approved_or_normal),
+        "itens_avaliados": total_items,
+        "proporcao_aprovacao": approved_or_normal / total_items if total_items else 0.0,
+        "coeficientes_significativos_10pct": significant_10pct,
+        "coeficientes_totais": total_coefficients,
         "teste_normalidade_observacao": normality_result.method_note,
-        "durbin_watson_valor": dw_result.statistic,
         "durbin_watson_faixa": (
-            f"{dw_result.lower_bound:.1f} a {dw_result.upper_bound:.1f}"
+            f"{dw_result.lower_bound:.2f} a {dw_result.upper_bound:.2f}"
         ),
-        "coeficientes_significativos_10pct": int(
-            (individual_significance_table["significativo_10pct"] == "SIM").sum()
-        ),
-        "coeficientes_totais": int(len(individual_significance_table)),
+        "durbin_watson_valor": dw_result.statistic,
     }
 
-    return diagnostics_report, individual_significance_table, summary
+    return diagnostics_df, individual_significance, summary
 
 
 def format_diagnostics_for_display(report_df: pd.DataFrame) -> pd.DataFrame:
-    """Formata o relatório para visualização em console ou notebook."""
-    formatted = report_df.copy()
-    formatted["valor_obtido"] = formatted["valor_obtido"].round(6)
-    return formatted
+    """Formata o relatório de diagnóstico para exibição amigável."""
+    display_df = report_df.copy()
+
+    if "valor_obtido" in display_df.columns:
+        display_df["valor_obtido"] = display_df["valor_obtido"].apply(
+            lambda value: f"{value:.6f}" if pd.notna(value) else "NA"
+        )
+
+    return display_df
 
 
 def format_coefficients_for_display(coeff_df: pd.DataFrame) -> pd.DataFrame:
-    """Formata a tabela de coeficientes para visualização."""
-    formatted = coeff_df.copy()
-    numeric_columns = ["coeficiente", "erro_padrao", "estatistica_t", "p_valor_t"]
-    formatted[numeric_columns] = formatted[numeric_columns].round(6)
-    return formatted
+    """Formata a tabela de coeficientes para exibição amigável."""
+    display_df = coeff_df.copy()
+
+    for column in ["coeficiente", "erro_padrao", "estatistica_t", "p_valor_t"]:
+        if column in display_df.columns:
+            display_df[column] = display_df[column].apply(
+                lambda value: f"{value:.6f}" if pd.notna(value) else "NA"
+            )
+
+    return display_df

@@ -1,188 +1,132 @@
-"""Aula 02 - Sanitização amostral por Chauvenet.
+"""Aula 2 - Sanitização estatística da amostra com o critério de Chauvenet.
 
-Script executável da segunda aula do treinamento inferencial.
-O objetivo é carregar a amostra já unitarizada, aplicar o
-critério de Chauvenet de forma iterativa e registrar, com
-transparência, quais observações foram removidas da série.
-
-Entregáveis didáticos:
-- base com valor unitário calculado;
-- amostra saneada;
-- tabela de removidos;
-- histórico de iterações da sanitização.
+Esta aula mostra como a série unitarizada pode ser refinada por meio
+da exclusão justificada de observações discrepantes. O foco didático
+está em tornar visível o que foi removido, em que rodada e por quê.
 """
 
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Final
 
 import pandas as pd
 
 from servicos.carregamento import load_raw_dataset, resolve_project_root
-from servicos.unitarizacao import UNIT_PRICE_COLUMN, add_unit_price_column
-from servicos.sanitizacao import build_sanitization_report
-
-DATASET_CANDIDATES: Final[tuple[str, ...]] = (
-    "amostras_residencial35.csv",
-    "amostrasresidencial35.csv",
-    "amostras_residencial.csv",
-)
+from servicos.sanitizacao import build_sanitization_report, sanitize_sample_chauvenet
+from servicos.unitarizacao import add_unit_price_column
 
 
 def locate_default_dataset(project_root: Path) -> Path:
-    """Localiza automaticamente a base padrão das aulas iniciais."""
-    data_dir = project_root / "data"
-
-    for filename in DATASET_CANDIDATES:
-        candidate = data_dir / filename
-        if candidate.exists():
-            return candidate
-
-    searched = ", ".join(DATASET_CANDIDATES)
-    raise FileNotFoundError(
-        "Nenhum arquivo padrão foi encontrado na pasta `data`. "
-        f"Arquivos procurados: {searched}."
-    )
+    """Localiza o CSV padrão usado na Aula 2."""
+    return project_root / "data" / "amostras_imoveis.csv"
 
 
 def print_section_title(title: str) -> None:
-    """Imprime um separador visual para as seções da aula."""
-    print(f"\n{'=' * 72}")
+    """Imprime um título de seção no terminal."""
+    print("\n" + "=" * 80)
     print(title)
-    print(f"{'=' * 72}")
+    print("=" * 80)
 
 
 def print_sample_overview(df: pd.DataFrame) -> None:
-    """Exibe uma visão geral inicial da amostra antes da sanitização."""
-    print_section_title("Amostra inicial")
-    print(f"Quantidade de registros: {len(df)}")
-
-    preview_columns = [
-        column
-        for column in ("id", "preco", "areaprivativa", UNIT_PRICE_COLUMN)
-        if column in df.columns
-    ]
-    print(df[preview_columns].head(8).to_string(index=False))
+    """Mostra visão geral da amostra antes da sanitização."""
+    print(f"Total de amostras: {len(df)}")
+    print(f"Média do valor unitário: R$ {df['valor_unitario'].mean():.2f}/m²")
+    print(f"Mediana do valor unitário: R$ {df['valor_unitario'].median():.2f}/m²")
+    print(
+        "Desvio-padrão do valor unitário: "
+        f"R$ {df['valor_unitario'].std(ddof=1):.2f}/m²"
+    )
 
 
 def print_iteration_history(history_df: pd.DataFrame) -> None:
-    """Exibe o histórico consolidado das iterações de Chauvenet."""
-    print_section_title("Histórico de iterações")
+    """Exibe o histórico iterativo do critério de Chauvenet."""
+    # Esta tabela é pedagogicamente importante porque mostra
+    # como o saneamento evolui rodada a rodada.
+    if history_df.empty:
+        print("Nenhum histórico de sanitização disponível.")
+        return
     print(history_df.to_string(index=False))
 
 
 def print_removed_rows(removed_df: pd.DataFrame) -> None:
-    """Exibe as observações removidas durante a sanitização."""
-    print_section_title("Observações removidas")
-
+    """Mostra as amostras removidas durante a sanitização."""
+    # Exibir explicitamente as linhas removidas ajuda o aluno
+    # a entender que a sanitização não é uma “caixa-preta”.
     if removed_df.empty:
-        print("Nenhuma observação foi removida pelo critério de Chauvenet.")
+        print("Nenhuma amostra foi removida.")
         return
-
-    preferred_columns = [
-        column
-        for column in (
-            "iteracao_remocao",
-            "id",
-            "preco",
-            "areaprivativa",
-            UNIT_PRICE_COLUMN,
-            "z_score",
-            "z_critical",
-        )
-        if column in removed_df.columns
-    ]
-    print(removed_df[preferred_columns].to_string(index=False))
+    print(removed_df.to_string(index=False))
 
 
 def print_cleaned_summary(clean_df: pd.DataFrame) -> None:
-    """Exibe estatísticas da amostra saneada."""
-    print_section_title("Amostra saneada")
-    print(f"Quantidade final de registros: {len(clean_df)}")
-
-    numeric_columns = [
-        column
-        for column in ("preco", "areaprivativa", UNIT_PRICE_COLUMN)
-        if column in clean_df.columns
-    ]
-    if numeric_columns:
-        print(clean_df[numeric_columns].describe().round(2).to_string())
+    """Exibe resumo da amostra saneada."""
+    print(f"Total de amostras após saneamento: {len(clean_df)}")
+    print(f"Média saneada: R$ {clean_df['valor_unitario'].mean():.2f}/m²")
+    print(f"Mediana saneada: R$ {clean_df['valor_unitario'].median():.2f}/m²")
+    print(
+        f"Desvio-padrão saneado: R$ {clean_df['valor_unitario'].std(ddof=1):.2f}/m²"
+    )
 
 
 def print_final_report(report: dict[str, object]) -> None:
-    """Exibe um resumo executivo da Aula 2."""
-    print_section_title("Resumo executivo da sanitização")
-    print(f"Amostra inicial: {report['amostra_inicial']}")
-    print(f"Amostra saneada: {report['amostra_saneada']}")
+    """Exibe o consolidado final da sanitização."""
+    print(f"Total original: {report['total_original']}")
+    print(f"Total saneado: {report['total_saneado']}")
     print(f"Total removido: {report['total_removido']}")
-
-    if report["total_removido"] == 0:
-        print("Resultado: a amostra permaneceu íntegra após o teste de Chauvenet.")
-    else:
-        print(
-            "Resultado: foram identificadas observações discrepantes "
-            "compatíveis com remoção estatística pelo critério de Chauvenet."
-        )
+    print(f"Percentual removido: {report['percentual_removido']:.2f}%")
 
 
 def export_outputs(
     project_root: Path,
-    report: dict[str, object],
+    clean_df: pd.DataFrame,
+    removed_df: pd.DataFrame,
+    history_df: pd.DataFrame,
 ) -> None:
-    """Exporta os principais artefatos da aula para a pasta data/output."""
+    """Exporta os artefatos gerados pela Aula 2."""
+    # A exportação preserva rastreabilidade e permite que
+    # as etapas seguintes trabalhem sobre a amostra já saneada.
     output_dir = project_root / "data" / "output"
     output_dir.mkdir(parents=True, exist_ok=True)
 
-    cleaned_path = output_dir / "aula_02_amostra_saneada.csv"
-    removed_path = output_dir / "aula_02_amostras_removidas.csv"
-    history_path = output_dir / "aula_02_historico_chauvenet.csv"
-
-    clean_df = report["df_saneado"]
-    removed_df = report["df_removidos"]
-    history_df = report["historico_iteracoes"]
-
-    clean_df.to_csv(cleaned_path, index=False)
-
-    if isinstance(removed_df, pd.DataFrame) and not removed_df.empty:
-        removed_df.to_csv(removed_path, index=False)
-
-    history_df.to_csv(history_path, index=False)
-
-    print_section_title("Arquivos exportados")
-    print(f"Amostra saneada: {cleaned_path}")
-    print(f"Histórico de iterações: {history_path}")
-    if isinstance(removed_df, pd.DataFrame) and not removed_df.empty:
-        print(f"Observações removidas: {removed_path}")
-    else:
-        print("Observações removidas: nenhuma exportação, pois não houve exclusões.")
+    clean_df.to_csv(output_dir / "aula_02_amostra_saneada.csv", index=False)
+    removed_df.to_csv(output_dir / "aula_02_amostras_removidas.csv", index=False)
+    history_df.to_csv(output_dir / "aula_02_historico_chauvenet.csv", index=False)
 
 
 def main(csv_path: Path | None = None) -> None:
-    """Executa o fluxo principal da Aula 2."""
+    """Executa o fluxo completo da Aula 2."""
     project_root = resolve_project_root()
     dataset_path = csv_path or locate_default_dataset(project_root)
 
-    print_section_title("Aula 02 - Sanitização amostral por Chauvenet")
-    print(f"Raiz do projeto: {project_root}")
-    print(f"Arquivo utilizado: {dataset_path}")
+    print_section_title("Aula 2 - Leitura e unitarização da base")
+    raw_df = load_raw_dataset(dataset_path)
+    unitized_df = add_unit_price_column(raw_df)
+    print_sample_overview(unitized_df)
 
-    df_raw = load_raw_dataset(dataset_path)
-    df_unitized = add_unit_price_column(df_raw)
+    # Nesta etapa aplicamos o saneamento iterativo sobre o valor unitário.
+    clean_df, removed_df, history_df = sanitize_sample_chauvenet(unitized_df)
 
-    print_sample_overview(df_unitized)
+    print_section_title("Aula 2 - Histórico do critério de Chauvenet")
+    print_iteration_history(history_df)
+
+    print_section_title("Aula 2 - Amostras removidas")
+    print_removed_rows(removed_df)
+
+    print_section_title("Aula 2 - Resumo da amostra saneada")
+    print_cleaned_summary(clean_df)
 
     report = build_sanitization_report(
-        df=df_unitized,
-        target_col=UNIT_PRICE_COLUMN,
-        id_col="id",
+        original_df=unitized_df,
+        clean_df=clean_df,
+        removed_df=removed_df,
+        history_df=history_df,
     )
 
-    print_iteration_history(report["historico_iteracoes"])
-    print_removed_rows(report["df_removidos"])
-    print_cleaned_summary(report["df_saneado"])
+    print_section_title("Aula 2 - Consolidado final")
     print_final_report(report)
-    export_outputs(project_root, report)
+
+    export_outputs(project_root, clean_df, removed_df, history_df)
 
 
 if __name__ == "__main__":
