@@ -16,7 +16,12 @@ import numpy as np
 import pandas as pd
 
 
+# Variável dependente padrão do modelo.
+# Neste projeto, a regressão busca explicar o preço do imóvel.
 DEFAULT_TARGET_COLUMN = "preco"
+
+# Conjunto preferencial de variáveis explicativas.
+# Elas representam atributos com leitura econômica direta na avaliação.
 DEFAULT_FEATURE_COLUMNS = ("areaprivativa", "vagas", "distanciacentrokm")
 
 
@@ -63,6 +68,8 @@ def _two_tailed_normal_p_value(t_statistic: float) -> float:
     teste t. Em amostras maiores isso tende a funcionar bem para fins
     instrutivos.
     """
+    # O valor absoluto do t é usado porque o teste é bicaudal:
+    # extremos positivos e negativos são igualmente relevantes.
     tail = _normal_survival_function(abs(float(t_statistic)))
     return 2.0 * tail
 
@@ -143,6 +150,7 @@ def f_survival_function(f_value: float, dfn: int, dfd: int) -> float:
     if f_value <= 0:
         return 1.0
 
+    # A estatística F é usada para testar a significância global do modelo.
     x = (dfn * f_value) / ((dfn * f_value) + dfd)
     cdf = regularized_incomplete_beta(x, dfn / 2.0, dfd / 2.0)
     return max(0.0, min(1.0, 1.0 - cdf))
@@ -159,6 +167,8 @@ def resolve_regression_columns(
             f"A coluna dependente `{target_col}` não foi encontrada no DataFrame."
         )
 
+    # Partimos das variáveis preferenciais do projeto e,
+    # se existir, incorporamos também a distância à praia.
     feature_candidates = list(preferred_features)
 
     if "dist_praia" in df.columns and "dist_praia" not in feature_candidates:
@@ -182,92 +192,163 @@ def build_design_matrix(
     add_intercept: bool = True,
 ) -> pd.DataFrame:
     """Monta a matriz de projeto para regressão."""
+    # A matriz X contém apenas as variáveis explicativas.
     X = df.loc[:, feature_columns].copy()
 
+    # A constante representa o intercepto do modelo,
+    # isto é, o valor esperado quando todas as explicativas são zero.
     if add_intercept:
         X.insert(0, "const", 1.0)
 
     return X.astype(float)
 
 
-def fit_ols_regression(
+def build_response_vector(
     df: pd.DataFrame,
-    *,
+    target_col: str = DEFAULT_TARGET_COLUMN,
+) -> pd.Series:
+    """Monta o vetor resposta da regressão."""
+    return df[target_col].astype(float).copy()
+
+
+def prepare_regression_dataframe(
+    df: pd.DataFrame,
     target_col: str = DEFAULT_TARGET_COLUMN,
     feature_columns: list[str] | None = None,
-    add_intercept: bool = True,
-) -> OLSRegressionArtifacts:
-    """Ajusta uma regressão linear múltipla por OLS."""
-    resolved_target, resolved_features = resolve_regression_columns(
-        df=df,
-        target_col=target_col,
-        preferred_features=tuple(feature_columns or DEFAULT_FEATURE_COLUMNS),
+) -> tuple[pd.DataFrame, str, list[str]]:
+    """Prepara a base final da regressão removendo nulos essenciais."""
+    target_col, resolved_features = (
+        (target_col, feature_columns)
+        if feature_columns is not None
+        else resolve_regression_columns(df, target_col=target_col)
     )
 
-    required_columns = [resolved_target, *resolved_features]
-    clean_df = df.loc[:, required_columns].dropna().copy()
+    required_columns = [target_col, *resolved_features]
 
-    X = build_design_matrix(clean_df, resolved_features, add_intercept=add_intercept)
-    y = clean_df[resolved_target].astype(float)
+    # A regressão só pode usar linhas com todas as variáveis necessárias preenchidas.
+    regression_df = df.loc[:, required_columns].dropna().copy()
 
-    X_values = X.to_numpy(dtype=float)
-    y_values = y.to_numpy(dtype=float)
-
-    xtx = X_values.T @ X_values
-    xtx_inv = np.linalg.inv(xtx)
-    beta = xtx_inv @ (X_values.T @ y_values)
-
-    fitted = X_values @ beta
-    residuals = y_values - fitted
-
-    n_obs = len(clean_df)
-    n_params = X.shape[1]
-    degrees_of_freedom_model = n_params - 1 if add_intercept else n_params
-    degrees_of_freedom_resid = n_obs - n_params
-
-    if degrees_of_freedom_resid <= 0:
+    if regression_df.empty:
         raise ValueError(
-            "Graus de liberdade residuais insuficientes para ajuste OLS. "
-            "A amostra precisa ser maior que o número de parâmetros."
+            "A base para regressão ficou vazia após a remoção de valores ausentes."
         )
 
-    y_mean = float(np.mean(y_values))
-    sse = float(np.sum(residuals**2))
-    sst = float(np.sum((y_values - y_mean) ** 2))
-    ssr = float(sst - sse)
+    return regression_df, target_col, resolved_features
 
-    r_squared = 1.0 - (sse / sst) if sst > 0 else 0.0
+
+
+def build_coefficients_table(artifacts: OLSRegressionArtifacts) -> pd.DataFrame:
+    """Monta uma tabela didática com os coeficientes do modelo.
+
+    Esta função organiza, em formato tabular, os principais números
+    usados na leitura inferencial de cada parâmetro estimado.
+    O objetivo é oferecer uma saída simples para aulas, testes e relatórios.
+    """
+    # Cada índice da série de coeficientes representa uma variável do modelo,
+    # como a constante (intercepto) e as variáveis explicativas.
+    table = pd.DataFrame(
+        {
+            "variavel": artifacts.coefficients.index,
+            "coeficiente": artifacts.coefficients.values,
+            "erro_padrao": artifacts.standard_errors.values,
+            "estatistica_t": artifacts.t_statistics.values,
+            "p_valor": artifacts.p_values.values,
+        }
+    )
+
+    # A coluna abaixo resume, de forma didática, se o coeficiente
+    # é estatisticamente significativo ao nível de 10%.
+    table["significativo_10pct"] = np.where(table["p_valor"] <= 0.10, "SIM", "NAO")
+    return table
+
+
+def fit_ols_regression(
+    df: pd.DataFrame,
+    target_col: str = DEFAULT_TARGET_COLUMN,
+    feature_columns: list[str] | None = None,
+    *,
+    add_intercept: bool = True,
+) -> OLSRegressionArtifacts:
+    """Ajusta uma regressão linear múltipla via mínimos quadrados ordinários."""
+    regression_df, target_col, resolved_features = prepare_regression_dataframe(
+        df,
+        target_col=target_col,
+        feature_columns=feature_columns,
+    )
+
+    # O parâmetro add_intercept é exposto nesta função para manter
+    # compatibilidade com testes e chamadas didáticas do projeto.
+    X = build_design_matrix(
+        regression_df,
+        resolved_features,
+        add_intercept=add_intercept,
+    )
+    y = build_response_vector(regression_df, target_col=target_col)
+
+    x_matrix = X.to_numpy(dtype=float)
+    y_vector = y.to_numpy(dtype=float)
+
+    n_obs = int(x_matrix.shape[0])
+    n_params = int(x_matrix.shape[1])
+
+    if n_obs <= n_params:
+        raise ValueError(
+            "Não há graus de liberdade residuais suficientes para ajustar o modelo OLS."
+        )
+
+    # OLS estima beta resolvendo o problema de mínimos quadrados:
+    # minimizar a soma dos resíduos ao quadrado.
+    xtx = x_matrix.T @ x_matrix
+    xtx_inv = np.linalg.inv(xtx)
+    beta = xtx_inv @ x_matrix.T @ y_vector
+
+    fitted = x_matrix @ beta
+    residuals = y_vector - fitted
+
+    y_mean = float(np.mean(y_vector))
+    sse = float(np.sum(residuals**2))
+    ssr = float(np.sum((fitted - y_mean) ** 2))
+    sst = float(np.sum((y_vector - y_mean) ** 2))
+
+    # SST mede a variabilidade total do preço.
+    # SSR mede a parcela explicada pelo modelo.
+    # SSE mede a parcela que sobrou nos resíduos.
+    r_squared = 0.0 if sst == 0 else ssr / sst
+
+    degrees_of_freedom_model = n_params - 1
+    degrees_of_freedom_resid = n_obs - n_params
+
     adjusted_r_squared = 1.0 - (
         ((1.0 - r_squared) * (n_obs - 1)) / degrees_of_freedom_resid
     )
 
     sigma2 = sse / degrees_of_freedom_resid
-    variance_covariance_matrix = sigma2 * xtx_inv
-    standard_errors = np.sqrt(np.diag(variance_covariance_matrix))
-    t_statistics = beta / standard_errors
-    p_values = np.array([_two_tailed_normal_p_value(t) for t in t_statistics])
-
-    mse = sse / n_obs
+    mse = sigma2
     rmse = float(np.sqrt(mse))
 
-    if degrees_of_freedom_model > 0:
+    variance_covariance = sigma2 * xtx_inv
+    standard_errors = np.sqrt(np.diag(variance_covariance))
+    t_statistics = beta / standard_errors
+    p_values = np.array([_two_tailed_normal_p_value(value) for value in t_statistics])
+
+    if degrees_of_freedom_model > 0 and mse > 0:
         msr = ssr / degrees_of_freedom_model
-        f_statistic = msr / sigma2 if sigma2 > 0 else np.inf
+        f_statistic = msr / mse
         f_p_value = f_survival_function(
-            f_value=float(f_statistic),
-            dfn=degrees_of_freedom_model,
-            dfd=degrees_of_freedom_resid,
+            f_statistic,
+            degrees_of_freedom_model,
+            degrees_of_freedom_resid,
         )
     else:
-        f_statistic = np.nan
-        f_p_value = np.nan
+        f_statistic = float("nan")
+        f_p_value = float("nan")
 
     coefficient_index = X.columns
 
     return OLSRegressionArtifacts(
         coefficients=pd.Series(beta, index=coefficient_index, name="coeficiente"),
-        fitted_values=pd.Series(fitted, index=clean_df.index, name="valor_ajustado"),
-        residuals=pd.Series(residuals, index=clean_df.index, name="residuo"),
+        fitted_values=pd.Series(fitted, index=regression_df.index, name="valor_estimado"),
+        residuals=pd.Series(residuals, index=regression_df.index, name="residuo"),
         design_matrix=X,
         response_vector=y,
         n_obs=n_obs,
@@ -282,7 +363,7 @@ def fit_ols_regression(
         ssr=float(ssr),
         sst=float(sst),
         variance_covariance_matrix=pd.DataFrame(
-            variance_covariance_matrix,
+            variance_covariance,
             index=coefficient_index,
             columns=coefficient_index,
         ),
@@ -307,9 +388,33 @@ def fit_ols_regression(
     )
 
 
-def build_coefficients_table(artifacts: OLSRegressionArtifacts) -> pd.DataFrame:
-    """Monta tabela didática de coeficientes e significância individual."""
-    table = pd.concat(
+
+def build_model_summary(artifacts: OLSRegressionArtifacts) -> dict[str, float | int]:
+    """Monta um dicionário-resumo com as métricas globais do modelo.
+
+    Esta função organiza os indicadores centrais do ajuste OLS
+    em formato simples, adequado para testes, relatórios e leitura didática.
+    """
+    # O resumo abaixo concentra tamanho da amostra, graus de liberdade,
+    # qualidade de ajuste e significância global do modelo.
+    return {
+        "n_obs": int(artifacts.n_obs),
+        "n_params": int(artifacts.n_params),
+        "gl_modelo": int(artifacts.degrees_of_freedom_model),
+        "gl_residuos": int(artifacts.degrees_of_freedom_resid),
+        "r2": float(artifacts.r_squared),
+        "r2_ajustado": float(artifacts.adjusted_r_squared),
+        "rmse": float(artifacts.rmse),
+        "f_statistic": float(artifacts.f_statistic),
+        "f_p_value": float(artifacts.f_p_value),
+    }
+
+
+def build_regression_summary(artifacts: OLSRegressionArtifacts) -> pd.DataFrame:
+    """Consolida coeficientes e estatísticas em tabela resumo."""
+    # Esta tabela é o coração interpretativo da regressão:
+    # reúne coeficiente, erro padrão, estatística t e p-valor.
+    summary = pd.concat(
         [
             artifacts.coefficients,
             artifacts.standard_errors,
@@ -317,46 +422,63 @@ def build_coefficients_table(artifacts: OLSRegressionArtifacts) -> pd.DataFrame:
             artifacts.p_values,
         ],
         axis=1,
-    ).reset_index()
-
-    table = table.rename(
-        columns={
-            "index": "variavel",
-            "coeficiente": "coeficiente",
-            "erro_padrao": "erro_padrao",
-            "estatistica_t": "estatistica_t",
-            "p_valor": "p_valor",
-        }
     )
-
-    table["significativo_10pct"] = np.where(table["p_valor"] <= 0.10, "SIM", "NAO")
-    return table
+    return summary
 
 
-def build_model_summary(artifacts: OLSRegressionArtifacts) -> dict[str, Any]:
-    """Consolida métricas centrais do ajuste OLS."""
+def attach_regression_outputs(
+    df: pd.DataFrame,
+    artifacts: OLSRegressionArtifacts,
+) -> pd.DataFrame:
+    """Acopla valores estimados e resíduos ao DataFrame base da regressão."""
+    result = df.copy()
+    result.loc[artifacts.fitted_values.index, "valor_estimado"] = artifacts.fitted_values
+    result.loc[artifacts.residuals.index, "residuo"] = artifacts.residuals
+    result.loc[artifacts.residuals.index, "residuo_percentual"] = (
+        artifacts.residuals / artifacts.response_vector
+    ) * 100.0
+    return result
+
+
+def build_regression_report(
+    df: pd.DataFrame,
+    target_col: str = DEFAULT_TARGET_COLUMN,
+    feature_columns: list[str] | None = None,
+) -> dict[str, Any]:
+    """Executa o ajuste e devolve um relatório completo da regressão."""
+    artifacts = fit_ols_regression(
+        df,
+        target_col=target_col,
+        feature_columns=feature_columns,
+    )
+    regression_df = attach_regression_outputs(df, artifacts)
+    summary_df = build_regression_summary(artifacts)
+
+    # O relatório final entrega tanto os artefatos numéricos
+    # quanto a base enriquecida para inspeção posterior.
     return {
-        "n_obs": artifacts.n_obs,
-        "n_params": artifacts.n_params,
-        "gl_modelo": artifacts.degrees_of_freedom_model,
-        "gl_residuos": artifacts.degrees_of_freedom_resid,
-        "r2": artifacts.r_squared,
-        "r2_ajustado": artifacts.adjusted_r_squared,
+        "target_column": target_col,
+        "feature_columns": feature_columns or list(DEFAULT_FEATURE_COLUMNS),
+        "n_observacoes": artifacts.n_obs,
+        "n_parametros": artifacts.n_params,
+        "graus_liberdade_modelo": artifacts.degrees_of_freedom_model,
+        "graus_liberdade_residuos": artifacts.degrees_of_freedom_resid,
+        "r_quadrado": artifacts.r_squared,
+        "r_quadrado_ajustado": artifacts.adjusted_r_squared,
+        "mse": artifacts.mse,
         "rmse": artifacts.rmse,
         "sse": artifacts.sse,
         "ssr": artifacts.ssr,
         "sst": artifacts.sst,
-        "f_statistic": artifacts.f_statistic,
-        "f_p_value": artifacts.f_p_value,
+        "estatistica_f": artifacts.f_statistic,
+        "p_valor_f": artifacts.f_p_value,
+        "sigma2": artifacts.sigma2,
+        "coeficientes": artifacts.coefficients,
+        "erros_padrao": artifacts.standard_errors,
+        "estatisticas_t": artifacts.t_statistics,
+        "p_valores": artifacts.p_values,
+        "matriz_covariancia": artifacts.variance_covariance_matrix,
+        "resumo_regressao": summary_df,
+        "dataframe_regressao": regression_df,
+        "artefatos": artifacts,
     }
-
-
-def attach_predictions_and_residuals(
-    df: pd.DataFrame,
-    artifacts: OLSRegressionArtifacts,
-) -> pd.DataFrame:
-    """Anexa valores ajustados e resíduos ao DataFrame original filtrado."""
-    enriched = df.loc[artifacts.response_vector.index].copy()
-    enriched["valor_ajustado"] = artifacts.fitted_values
-    enriched["residuo"] = artifacts.residuals
-    return enriched
