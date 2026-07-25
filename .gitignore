@@ -1,0 +1,22 @@
+# macOS
+.DS_Store
+
+# Jupyter
+.ipynb_checkpoints/
+**/.ipynb_checkpoints/
+
+# Notebooks executados
+notebooks/*.executed.ipynb
+
+# Outputs gerados
+data/output/
+
+# Build / empacotamento Python
+*.egg-info/
+dist/
+build/
+__pycache__/
+*.pyc
+
+# Backups locais
+notebooks_backup_*/

@@ -11,7 +11,7 @@ def test_sanitize_sample_chauvenet_removes_discrepant_observation(
 ) -> None:
     """Espera remoção de pelo menos um ponto discrepante."""
     df = add_unit_price_column(sample_market_df_with_outlier)
-    clean_df, outliers_df = sanitize_sample_chauvenet(df, target_col="vu")
+    clean_df, outliers_df, history_df = sanitize_sample_chauvenet(df, target_col="valor_unitario")
 
     assert len(clean_df) < len(df)
     assert not outliers_df.empty
@@ -23,6 +23,6 @@ def test_sanitize_sample_chauvenet_reduces_extreme_unit_values(
 ) -> None:
     """Verifica redução do extremo superior após sanitização."""
     df = add_unit_price_column(sample_market_df_with_outlier)
-    clean_df, outliers_df = sanitize_sample_chauvenet(df, target_col="vu")
+    clean_df, outliers_df, history_df = sanitize_sample_chauvenet(df, target_col="valor_unitario")
 
-    assert outliers_df["vu"].max() > clean_df["vu"].max()
+    assert outliers_df["valor_unitario"].max() > clean_df["valor_unitario"].max()

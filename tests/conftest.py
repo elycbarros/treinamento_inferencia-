@@ -42,7 +42,9 @@ def sample_market_df() -> pd.DataFrame:
                 "preco": float(preco),
                 "areaprivativa": float(area),
                 "vagas": int(vagas),
+                "idadeaparente": int(5 + (i % 12)),
                 "distanciacentrokm": float(dist),
+                "fontelink": f"fonte-{i:03d}",
             }
         )
     return pd.DataFrame(rows)
@@ -58,7 +60,9 @@ def sample_market_df_with_outlier(sample_market_df: pd.DataFrame) -> pd.DataFram
                 "preco": 5_000_000.0,
                 "areaprivativa": 70.0,
                 "vagas": 1,
+                "idadeaparente": 20,
                 "distanciacentrokm": 5.0,
+                "fontelink": "fonte-999",
             }
         ]
     )

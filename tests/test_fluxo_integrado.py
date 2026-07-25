@@ -11,7 +11,7 @@ from servicos.unitarizacao import add_unit_price_column
 def test_end_to_end_training_flow(sample_market_df_with_outlier) -> None:
     """Executa unitarização, sanitização, regressão e diagnósticos."""
     df = add_unit_price_column(sample_market_df_with_outlier)
-    clean_df, outliers_df = sanitize_sample_chauvenet(df, target_col="vu")
+    clean_df, outliers_df, history_df = sanitize_sample_chauvenet(df, target_col="valor_unitario")
 
     artifacts = fit_ols_regression(
         df=clean_df,

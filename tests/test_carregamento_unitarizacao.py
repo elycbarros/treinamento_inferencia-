@@ -20,9 +20,9 @@ def test_add_unit_price_column_creates_vu(sample_market_df) -> None:
     """Valida a criação da coluna de valor unitário."""
     result = add_unit_price_column(sample_market_df)
 
-    assert "vu" in result.columns
+    assert "valor_unitario" in result.columns
     expected_vu = result.loc[0, "preco"] / result.loc[0, "areaprivativa"]
-    assert result.loc[0, "vu"] == pytest.approx(expected_vu)
+    assert result.loc[0, "valor_unitario"] == pytest.approx(expected_vu)
 
 
 def test_add_unit_price_column_preserves_row_count(sample_market_df) -> None:
